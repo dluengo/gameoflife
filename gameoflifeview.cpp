@@ -1,9 +1,3 @@
-/*
- * gameoflifeview.cpp
- *
- *  Created on: Feb 26, 2024
- *      Author: dluengo
- */
 #include <iostream>
 #include <sigc++/sigc++.h>
 #include <gtkmm.h>
@@ -37,7 +31,6 @@ public:
 	~CellView() {}
 
 	void on_cell_clicked() {
-		std::cout << __func__ << '\n';
 		if (m_ptr_game->isCellAlive(m_x, m_y)) {
 			this->set_label(" ");
 			m_ptr_game->setCell(m_x, m_y, false);
