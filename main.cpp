@@ -8,5 +8,5 @@ int main(int argc, char *argv[]) {
 	GameOfLife game = GameOfLife(10, 10);
 	GameOfLifeView game_view = GameOfLifeView(game);
 
-	return app->run(game_view); // @suppress("Method cannot be resolved")
+	return app->run(*game_view.getWindow()); // @suppress("Method cannot be resolved")
 }

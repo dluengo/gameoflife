@@ -12,7 +12,7 @@
 
 #include "gameoflifeview.h"
 
-GameOfLifeView *GAME_VIEW;
+GameOfLifeView *_GAME;
 
 class CellView: public Gtk::Button {
 public:
@@ -33,9 +33,11 @@ public:
 			this->set_label(" ");
 		}
 	}
+
 	~CellView() {}
 
 	void on_cell_clicked() {
+		std::cout << __func__ << '\n';
 		if (m_ptr_game->isCellAlive(m_x, m_y)) {
 			this->set_label(" ");
 			m_ptr_game->setCell(m_x, m_y, false);
@@ -63,82 +65,103 @@ public:
 };
 
 void alarm_handler(int signum) {
-	GAME_VIEW->getGame()->do_step();
-	GAME_VIEW->refreshView();
+	_GAME->getGame()->do_step();
+	_GAME->refreshView();
 }
 
+// This handler handles both the run and pause actions.
 void GameOfLifeView::on_run_button_clicked() {
-	if (m_game_is_running) {
-		// Pause the game.
-		std::cout << __func__ << " called\n";
-		struct itimerval interval;
-		interval.it_interval.tv_sec = 0;
-		interval.it_interval.tv_usec = 0;
-		interval.it_value.tv_sec = 0;
-		interval.it_value.tv_usec = 0;
-		int err = setitimer(ITIMER_REAL, &interval, NULL);
-		if (err) {
-			std::cout << "Error Disarming alarm\n";
-		}
-
-		// Prepare the run button.
-		this->m_run_button->set_label("Run");
-
-		this->m_game_is_running = false;
+	if (!m_game_is_running) {
+		run_game();
 	} else {
-		// Set SIGALRM handler.
-		struct sigaction sigact;
-		sigact.sa_handler = alarm_handler;
-		sigemptyset(&sigact.sa_mask);
-		sigact.sa_flags = 0;
-		int err = sigaction(SIGALRM, &sigact, NULL);
-		if (err) {
-			std::cout << "Error setting SIGALRM handler\n";
-		}
-
-		// Set timer. It'll generate SIGALRM when it goes off.
-		struct itimerval interval;
-		interval.it_interval.tv_sec = 0;
-		interval.it_interval.tv_usec = 500000;
-		interval.it_value.tv_sec = 0;
-		interval.it_value.tv_usec = 500000;
-		err = setitimer(ITIMER_REAL, &interval, NULL);
-		if (err) {
-			std::cout << "Error setting timer\n";
-		}
-
-		this->m_run_button->set_label("Pause");
-		this->m_game_is_running = true;
+		pause_game();
 	}
 }
 
 void GameOfLifeView::on_new_game_button_clicked() {
-	std::cout << __func__ << " called\n";
+	if (m_game_is_running) {
+		pause_game();
+	}
+
+	for (int i = 0; i < m_game.getHeight(); i++) {
+		for (int j = 0; j < m_game.getWidth(); j++) {
+			CellView *cellview = dynamic_cast<CellView *>(m_board_grid->get_child_at(i, j));
+			m_board_grid->remove(*cellview);
+		}
+	}
+
+	int new_height{ std::stoi(m_height_entry->get_text()) }; // @suppress("Invalid arguments")
+	int new_width{ std::stoi(m_width_entry->get_text()) }; // @suppress("Invalid arguments")
+	m_game_speed = std::stoi(m_speed_entry->get_text()) * 1000 ; // @suppress("Invalid arguments")
+
+	m_game = GameOfLife(new_height, new_width);
+
+	for (int i = 0; i < new_height; i++) {
+		for (int j = 0; j < new_width; j++) {
+			CellView *cellview = new CellView(i, j, &m_game);
+			Gtk::manage(cellview);
+			cellview->signal_evolve().connect(sigc::mem_fun(*cellview, &CellView::on_evolve));
+			m_board_grid->attach(*cellview, i, j);
+		}
+	}
+
+	m_toplevel_window->show_all();
 }
 
-GameOfLifeView::GameOfLifeView(GameOfLife game):
-		m_game(game),
-		m_game_is_running(false) {
-	GAME_VIEW = this;
+void GameOfLifeView::run_game() {
+	// Set SIGALRM handler.
+	struct sigaction sigact;
+	sigact.sa_handler = alarm_handler; // @suppress("Field cannot be resolved")
+	sigemptyset(&sigact.sa_mask); // @suppress("Function cannot be resolved") // @suppress("Field cannot be resolved")
+	sigact.sa_flags = 0; // @suppress("Field cannot be resolved")
+	int err = sigaction(SIGALRM, &sigact, NULL); // @suppress("Symbol is not resolved")
+	if (err) {
+		std::cout << "Error setting SIGALRM handler\n";
+	}
 
-	Gtk::Grid *toplevel_grid = new Gtk::Grid();
-	Gtk::manage(toplevel_grid);
-	m_board_grid = new Gtk::Grid();
-	Gtk::manage(m_board_grid);
-	Gtk::Grid *buttons_grid = new Gtk::Grid();
-	Gtk::manage(buttons_grid);
+	// Set timer. It'll generate SIGALRM when it goes off and resume the game.
+	struct itimerval interval;
+	interval.it_interval.tv_sec = 0;
+	interval.it_interval.tv_usec = m_game_speed;
+	interval.it_value.tv_sec = 0;
+	interval.it_value.tv_usec = m_game_speed;
+	err = setitimer(ITIMER_REAL, &interval, NULL);
+	if (err) {
+		std::cout << "Error setting timer\n";
+	}
 
-	m_run_button = new Gtk::Button("Run");
-	Gtk::manage(m_run_button);
-	Gtk::Button *new_game_button = new Gtk::Button("New game");
-	Gtk::manage(new_game_button);
+	m_run_button->set_label("Pause");
+	m_game_is_running = true;
+}
 
-	m_run_button->signal_clicked().connect(sigc::mem_fun(*this, &GameOfLifeView::on_run_button_clicked));
-	new_game_button->signal_clicked().connect(sigc::mem_fun(*this, &GameOfLifeView::on_new_game_button_clicked));
+void GameOfLifeView::pause_game() {
+	struct itimerval interval;
+	interval.it_interval.tv_sec = 0;
+	interval.it_interval.tv_usec = 0;
+	interval.it_value.tv_sec = 0;
+	interval.it_value.tv_usec = 0;
+	int err = setitimer(ITIMER_REAL, &interval, NULL);
+	if (err) {
+		std::cout << "Error Disarming alarm\n";
+	}
 
-	buttons_grid->attach(*m_run_button, 0, 0);
-	buttons_grid->attach(*new_game_button, 1, 0);
+	m_run_button->set_label("Run");
+	m_game_is_running = false;
+}
 
+GameOfLifeView::GameOfLifeView(GameOfLife game)
+: m_game(game),
+  m_game_is_running(false),
+  m_game_speed(500000)
+{
+	_GAME = this;
+
+	// Load the GUI description from file.
+	Glib::RefPtr<Gtk::Builder> builder = Gtk::Builder::create_from_file("gameoflife.glade"); // @suppress("Invalid arguments")
+	builder->get_widget("toplevel_window", m_toplevel_window);
+
+	// Set up the grid that will contain all the cells.
+	builder->get_widget("board_grid", m_board_grid);
 	for (int i = 0; i < m_game.getHeight(); i++) {
 		for (int j = 0; j < m_game.getWidth(); j++) {
 			CellView *cellview = new CellView(i, j, &m_game);
@@ -149,11 +172,20 @@ GameOfLifeView::GameOfLifeView(GameOfLife game):
 		}
 	}
 
-	toplevel_grid->attach(*m_board_grid, 0, 0);
-	toplevel_grid->attach(*buttons_grid, 0, 1);
+	// Connect the buttons to the proper handlers.
+	builder->get_widget("run_button", m_run_button);
+	builder->get_widget("new_game_button", m_new_game_button);
+	m_run_button->signal_clicked().connect(sigc::mem_fun(*this, &GameOfLifeView::on_run_button_clicked));
+	m_new_game_button->signal_clicked().connect(sigc::mem_fun(*this, &GameOfLifeView::on_new_game_button_clicked));
 
-	this->add(*toplevel_grid);
-	this->show_all();
+	builder->get_widget("height_entry", m_height_entry);
+	builder->get_widget("width_entry", m_width_entry);
+	builder->get_widget("speed_entry", m_speed_entry);
+	m_height_entry->set_text(std::to_string(m_game.getHeight())); // @suppress("Invalid arguments")
+	m_width_entry->set_text(std::to_string(m_game.getWidth())); // @suppress("Invalid arguments")
+	m_speed_entry->set_text(std::to_string(m_game_speed / 1000)); // @suppress("Invalid arguments")
+
+	m_toplevel_window->show_all();
 }
 
 GameOfLifeView::~GameOfLifeView(){
@@ -169,7 +201,6 @@ bool GameOfLifeView::isGameRunning() {
 }
 
 void GameOfLifeView::refreshView() {
-	// Run through the buttons sending clicked signal.
 	for (int i = 0; i < m_game.getHeight(); i++) {
 		for (int j = 0; j < m_game.getWidth(); j++) {
 			CellView *cellview = dynamic_cast<CellView*>(m_board_grid->get_child_at(i, j));
@@ -181,4 +212,8 @@ void GameOfLifeView::refreshView() {
 			cellview->refresh();
 		}
 	}
+}
+
+Gtk::Window * GameOfLifeView::getWindow() {
+	return this->m_toplevel_window;
 }
